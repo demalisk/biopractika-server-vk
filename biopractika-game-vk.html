@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a2e1a">
+  <title>Biopractika — Антистресс</title>
+  <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #1a2e1a; overflow: hidden; -webkit-user-select: none; user-select: none; }
+    #game-root {
+      width: 100%; max-width: 480px; margin: 0 auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a2e1a; height: 100vh; position: relative; overflow: hidden;
+    }
+    #bg-layer { position: absolute; inset: 0; background: url('assets/background.png') center center / cover no-repeat; }
+    #bg-layer::after { content: ''; position: absolute; inset: 0; background: rgba(10,25,10,0.25); }
+    .bg-leaf { position: absolute; opacity: 0.07; font-size: 40px; pointer-events: none; }
+    #hud {
+      position: relative; z-index: 10;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px 6px; gap: 8px;
+    }
+    .hud-stat { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+    .hud-label { font-size: 10px; color: rgba(255,255,255,0.5); letter-spacing: 0.07em; text-transform: uppercase; }
+    .hud-value { font-size: 17px; font-weight: 500; color: #fff; }
+    .bar-wrap { width: 100%; height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 5px; transition: width 0.25s; }
+    #stress-fill { background: #e56b50; }
+    #happy-fill  { background: #7ec87e; }
+    .hud-score { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
+    #hud-timer { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 1px; }
+    #hud-timer.danger { color: #e56b50; font-weight: 600; }
+    #btn-pause {
+      position: absolute; top: 10px; right: 12px; z-index: 20;
+      background: rgba(255,255,255,0.08); border: 0.5px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.6); font-size: 18px;
+      width: 32px; height: 32px; border-radius: 8px;
+      display: none; align-items: center; justify-content: center; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #btn-pause.visible { display: flex; }
+    #btn-mute {
+      position: absolute; top: 10px; right: 50px; z-index: 20;
+      background: rgba(255,255,255,0.08); border: 0.5px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.6); font-size: 16px;
+      width: 32px; height: 32px; border-radius: 8px;
+      display: none; align-items: center; justify-content: center; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #btn-mute.visible { display: flex; }
+    #multiplier-badge {
+      position: absolute; top: 54px; right: 14px; z-index: 15;
+      background: rgba(126,200,126,0.2); border: 1px solid rgba(126,200,126,0.5);
+      color: #a8e6a8; font-size: 11px; font-weight: 500;
+      padding: 3px 8px; border-radius: 10px;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    #multiplier-badge.active { opacity: 1; }
+    #wave-banner {
+      position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+      z-index: 25; background: rgba(229,107,80,0.85);
+      color: #fff; font-size: 13px; font-weight: 500;
+      padding: 5px 16px; border-radius: 20px; white-space: nowrap;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    #wave-banner.show { opacity: 1; }
+    #canvas-area { position: relative; width: 100%; height: calc(100vh - 56px); overflow: hidden; pointer-events: none; }
+    #canvas-area.active { pointer-events: all; }
+    .falling-obj {
+      position: absolute; width: 55px; height: 55px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px; border-radius: 50%;
+    }
+    .falling-obj.good { background: rgba(126,200,126,0.15); border: 1.5px solid rgba(126,200,126,0.4); }
+    .falling-obj.bad  { background: rgba(229,107,80,0.15);  border: 1.5px solid rgba(229,107,80,0.4); }
+    .falling-obj.bonus {
+      width: 62px; height: 62px; font-size: 36px;
+      background: rgba(255,210,60,0.18); border: 2px solid rgba(255,210,60,0.7);
+      box-shadow: 0 0 12px rgba(255,210,60,0.35); border-radius: 12px;
+      animation: bonusPulse 0.4s ease-in-out infinite alternate;
+    }
+    .falling-obj.bomb {
+      width: 62px; height: 62px; font-size: 36px;
+      background: rgba(180,40,40,0.25); border: 2px solid rgba(255,80,80,0.8);
+      box-shadow: 0 0 14px rgba(255,60,60,0.45); border-radius: 50%;
+      animation: bombPulse 0.35s ease-in-out infinite alternate;
+    }
+    .falling-obj.fake-reveal { animation: fakeFlash 0.15s ease-in-out 3; }
+    @keyframes bonusPulse {
+      from { box-shadow: 0 0 8px rgba(255,210,60,0.3); }
+      to   { box-shadow: 0 0 22px rgba(255,210,60,0.75); }
+    }
+    @keyframes bombPulse {
+      from { box-shadow: 0 0 8px rgba(255,60,60,0.35); }
+      to   { box-shadow: 0 0 22px rgba(255,60,60,0.8); }
+    }
+    @keyframes fakeFlash {
+      0%   { background: rgba(126,200,126,0.15); border-color: rgba(126,200,126,0.4); }
+      50%  { background: rgba(229,107,80,0.25);  border-color: rgba(229,107,80,0.7); }
+      100% { background: rgba(229,107,80,0.15);  border-color: rgba(229,107,80,0.4); }
+    }
+    #basket {
+      position: absolute; bottom: 20px; width: 72px; height: 40px;
+      background: #4a2c0a; border-radius: 4px 4px 14px 14px;
+      border: 2px solid #7a4a1a;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; touch-action: none;
+    }
+    #basket::before {
+      content: ''; position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
+      width: 44px; height: 9px; border: 2px solid #7a4a1a;
+      border-bottom: none; border-radius: 9px 9px 0 0;
+    }
+    .pop-text {
+      position: absolute; font-size: 13px; font-weight: 500;
+      pointer-events: none; z-index: 20;
+      animation: popUp 0.8s ease-out forwards;
+    }
+    .pop-text.big { font-size: 20px; font-weight: 700; animation: popUpBig 1s ease-out forwards; }
+    @keyframes popUp {
+      0%   { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-44px); }
+    }
+    @keyframes popUpBig {
+      0%   { opacity: 1; transform: translateY(0) scale(1.2); }
+      30%  { transform: translateY(-10px) scale(1.3); }
+      100% { opacity: 0; transform: translateY(-60px) scale(0.9); }
+    }
+    #flash-overlay {
+      position: absolute; inset: 0; z-index: 28;
+      background: rgba(255,60,60,0.35);
+      pointer-events: none; opacity: 0; transition: opacity 0.05s;
+    }
+    #flash-overlay.flash { opacity: 1; }
+    .panel {
+      position: absolute; inset: 0; z-index: 30;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(10,20,10,0.93);
+      gap: 14px; padding: 28px 24px;
+    }
+    .panel.hidden { display: none; }
+    .screen-logo { font-size: 52px; line-height: 1; }
+    .screen-brand { font-size: 11px; color: rgba(255,255,255,0.3); letter-spacing: 0.2em; text-transform: uppercase; margin-top: -6px; }
+    .screen-title { font-size: 21px; font-weight: 500; color: #c8e6c8; text-align: center; }
+    .screen-sub { font-size: 13px; color: rgba(255,255,255,0.45); text-align: center; line-height: 1.7; max-width: 270px; }
+    .legend { display: flex; gap: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 9px 12px; flex-wrap: wrap; justify-content: center; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(255,255,255,0.55); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .dot.g    { background: #7ec87e; }
+    .dot.b    { background: #e56b50; }
+    .dot.gold { background: #ffd23c; border-radius: 3px; }
+    .dot.bomb { background: #ff5050; }
+    .btn-primary {
+      background: #3d7a3d; color: #d4f0d4; border: none;
+      border-radius: 24px; padding: 13px 36px;
+      font-size: 15px; font-weight: 500; cursor: pointer; width: 220px; text-align: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn-primary:active { background: #4a924a; transform: scale(0.97); }
+    .btn-secondary {
+      background: transparent; color: rgba(255,255,255,0.45);
+      border: 0.5px solid rgba(255,255,255,0.15);
+      border-radius: 24px; padding: 11px 36px;
+      font-size: 14px; cursor: pointer; width: 220px; text-align: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn-secondary:active { color: rgba(255,255,255,0.7); }
+    #score-big { font-size: 54px; font-weight: 500; color: #7ec87e; line-height: 1; }
+    .score-label { font-size: 12px; color: rgba(255,255,255,0.4); letter-spacing: 0.1em; text-transform: uppercase; margin-top: -6px; }
+    .end-reason { font-size: 13px; color: rgba(255,255,255,0.4); text-align: center; }
+    .lb-wrap { width: 100%; max-width: 300px; display: flex; flex-direction: column; gap: 6px; }
+    .lb-row { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; padding: 7px 12px; }
+    .lb-rank { font-size: 12px; color: rgba(255,255,255,0.3); width: 18px; text-align: center; }
+    .lb-name { flex: 1; font-size: 13px; color: rgba(255,255,255,0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lb-score { font-size: 13px; font-weight: 500; color: #7ec87e; }
+    .lb-row.highlight { background: rgba(126,200,126,0.12); border: 0.5px solid rgba(126,200,126,0.3); }
+    .lb-row.highlight .lb-name { color: #c8e6c8; }
+    .lb-empty { font-size: 13px; color: rgba(255,255,255,0.25); text-align: center; padding: 12px 0; }
+    .lb-section-title { font-size: 11px; color: rgba(255,255,255,0.3); letter-spacing: 0.08em; text-transform: uppercase; text-align: center; }
+  </style>
+</head>
+<body>
+<div id="game-root">
+  <div id="bg-layer"></div>
+  <div id="hud">
+    <div class="hud-stat">
+      <span class="hud-label">😰 Стресс</span>
+      <div class="bar-wrap"><div class="bar-fill" id="stress-fill" style="width:0%"></div></div>
+    </div>
+    <div class="hud-score">
+      <span class="hud-label">Очки</span>
+      <span class="hud-value" id="score-display">0</span>
+      <span id="hud-timer">5:00</span>
+    </div>
+    <div class="hud-stat">
+      <span class="hud-label">😊 Счастье</span>
+      <div class="bar-wrap"><div class="bar-fill" id="happy-fill" style="width:50%"></div></div>
+    </div>
+  </div>
+  <div id="multiplier-badge">×1.5 бонус!</div>
+  <div id="wave-banner">⚠️ Волна стресса!</div>
+  <div id="btn-mute">🔊</div>
+  <div id="btn-pause">⏸</div>
+  <div id="flash-overlay"></div>
+  <div id="canvas-area"><div id="basket">🫖</div></div>
+
+  <!-- SUBSCRIPTION CHECK -->
+  <div class="panel hidden" id="panel-sub">
+    <div class="screen-logo">📢</div>
+    <div class="screen-brand">Biopractika</div>
+    <div class="screen-title">Вступи в сообщество</div>
+    <div class="screen-sub">Для участия в игре и глобальном лидерборде вступи в наше сообщество ВКонтакте</div>
+    <a class="btn-primary" href="https://vk.com/biopractika" target="_blank" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">
+      Вступить →
+    </a>
+    <button class="btn-secondary" id="btn-check-sub">Я подписался ✓</button>
+    <div id="sub-error" style="font-size:12px;color:#e56b50;text-align:center;min-height:18px;"></div>
+  </div>
+
+  <!-- MAIN MENU -->
+  <div class="panel hidden" id="panel-menu">
+    <div class="screen-logo">🍵</div>
+    <div class="screen-brand">Biopractika</div>
+    <div class="screen-title">Антистресс</div>
+    <div class="screen-sub">Выживи 5 минут! Лови чай, избегай стресс.<br>Пачка чая +500 🎁 · Бомба −500 💣</div>
+    <div class="legend">
+      <div class="legend-item"><div class="dot g"></div>Чай = +счастье</div>
+      <div class="legend-item"><div class="dot b"></div>Стресс = конец</div>
+    </div>
+    <button class="btn-primary" id="btn-play">Начать игру</button>
+    <button class="btn-secondary" id="btn-show-lb">Лидерборд</button>
+  </div>
+
+  <!-- LEADERBOARD -->
+  <div class="panel hidden" id="panel-lb">
+    <div class="screen-logo">🏆</div>
+    <div class="screen-title">Лидерборд</div>
+    <div class="lb-section-title">Топ игроков</div>
+    <div class="lb-wrap" id="lb-list"><div class="lb-empty">Загрузка...</div></div>
+    <button class="btn-secondary" id="btn-lb-back">← Назад</button>
+  </div>
+
+  <!-- PAUSE -->
+  <div class="panel hidden" id="panel-pause">
+    <div class="screen-logo">⏸</div>
+    <div class="screen-title">Пауза</div>
+    <div class="screen-sub" id="pause-score-text"></div>
+    <button class="btn-primary" id="btn-resume">Продолжить</button>
+    <button class="btn-secondary" id="btn-quit">Выйти в меню</button>
+  </div>
+
+  <!-- GAME OVER -->
+  <div class="panel hidden" id="panel-over">
+    <div class="screen-logo" id="over-logo">🍵</div>
+    <div id="score-big">0</div>
+    <div class="score-label">очков</div>
+    <div class="end-reason" id="end-reason"></div>
+    <div class="lb-section-title">Топ игроков</div>
+    <div class="lb-wrap" id="lb-list-over"><div class="lb-empty">Загрузка...</div></div>
+    <button class="btn-primary" id="btn-replay">Играть снова</button>
+    <button class="btn-secondary" id="btn-over-menu">В меню</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  // VK Bridge инициализация
+  if(window.vkBridge) vkBridge.send('VKWebAppInit');
+
+  const GOOD = ['🍵','🫖','🌿','🍃','🌱','🌸','🫧'];
+  const BAD  = ['☕','📱','💼','📊','🔔','⚡','💊'];
+  const GAME_DURATION  = 300;
+
+  // Скорость и спавн по таблице из Book1.xlsx (линейная интерполяция между точками)
+  const SPEED_TABLE = [
+    [0,   1.20], [20,  1.53], [40,  1.94], [60,  2.20],
+    [80,  2.45], [100, 2.99], [120, 3.41], [140, 4.15],
+    [160, 5.78], [180, 6.76], [210, 8.20], [240, 10.50],
+    [270, 13.80],[300, 18.00]
+  ];
+  const SPAWN_TABLE = [
+    [0,   1400], [20,  1100], [40,  1041], [60,  945],
+    [80,  830],  [100, 703],  [120, 601],  [140, 501],
+    [160, 401],  [180, 300],  [210, 250],  [240, 210],
+    [270, 180],  [300, 150]
+  ];
+
+  function interpolate(table, t){
+    if(t <= table[0][0]) return table[0][1];
+    if(t >= table[table.length-1][0]) return table[table.length-1][1];
+    for(let i=0; i<table.length-1; i++){
+      const [t0,v0] = table[i], [t1,v1] = table[i+1];
+      if(t >= t0 && t <= t1) return v0 + (v1-v0) * (t-t0)/(t1-t0);
+    }
+    return table[table.length-1][1];
+  }
+
+  function getSpeed(t){ return interpolate(SPEED_TABLE, t); }
+  function getSpawnDelay(t){ return interpolate(SPAWN_TABLE, t); }
+
+  const BASKET_INERTIA  = 0.13;
+  const STRESS_PER_SEC  = 1.2;
+  const HAPPY_DECAY_SEC = 0.8;
+  const WAVE_INTERVAL   = 15000;
+  const WAVE_WARNING_MS = 1200;
+  const WAVE_COUNT      = 4;
+  const WAVE_GAP_MS     = 320;
+  const BONUS_SPEED     = 7.5;
+  const BOMB_SPEED      = 6.5;
+  const BONUS_INT_MIN   = 18000;
+  const BONUS_INT_MAX   = 28000;
+  const BOMB_INT_MIN    = 20000;
+  const BOMB_INT_MAX    = 32000;
+
+  let score=0, stress=0, happy=50;
+  let gameActive=false, gamePaused=false;
+  let objects=[], basketX=0, basketTargetX=0, frameId=null;
+  let startTime=0, pausedAt=0, totalPausedMs=0;
+  let elapsedSec=0, lastSpawnTime=0, lastFrameTs=0;
+  let waveWarningShown=false;
+
+  const area       = document.getElementById('canvas-area');
+  const basketEl   = document.getElementById('basket');
+  const scoreEl    = document.getElementById('score-display');
+  const timerEl    = document.getElementById('hud-timer');
+  const stressFill = document.getElementById('stress-fill');
+  const happyFill  = document.getElementById('happy-fill');
+  const multBadge  = document.getElementById('multiplier-badge');
+  const btnMute    = document.getElementById('btn-mute');
+  const btnPause   = document.getElementById('btn-pause');
+  const waveBanner = document.getElementById('wave-banner');
+  const flashOvl   = document.getElementById('flash-overlay');
+
+  const areaW = () => area.offsetWidth;
+  const areaH = () => area.offsetHeight;
+
+  // ─── Web Audio ───────────────────────────────────────────────
+  let audioCtx = null;
+  let audioMuted = false;
+
+  // Фоновая музыка
+  const bgMusic = new Audio('assets/music01.mp3');
+  bgMusic.loop = true;
+  bgMusic.volume = 0.35;
+
+  function ensureAudio(){
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    bgMusic.play().catch(()=>{});
+  }
+
+  // Базовый осциллятор с огибающей
+  function osc(freq, type, dur, vol=0.28, startFreq=null, endFreq=null){
+    if(audioMuted||!audioCtx) return;
+    try{
+      const o=audioCtx.createOscillator();
+      const g=audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type=type;
+      const t=audioCtx.currentTime;
+      o.frequency.setValueAtTime(startFreq||freq, t);
+      if(endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, t+dur);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+      o.start(t); o.stop(t+dur);
+    }catch(e){}
+  }
+
+  // Белый шум (для взрыва)
+  function noise(dur, vol=0.22){
+    if(audioMuted||!audioCtx) return;
+    try{
+      const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*dur,audioCtx.sampleRate);
+      const d=buf.getChannelData(0);
+      for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1);
+      const src=audioCtx.createBufferSource();
+      src.buffer=buf;
+      const g=audioCtx.createGain();
+      const t=audioCtx.currentTime;
+      g.gain.setValueAtTime(vol,t);
+      g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+      src.connect(g); g.connect(audioCtx.destination);
+      src.start(t);
+    }catch(e){}
+  }
+
+  const SFX = {
+    // Поймал хороший — лёгкий приятный "пинг"
+    good(){ osc(520,'sine',0.12,0.25); },
+
+    // Поймал хороший с бонусом ×1.5 — чуть выше и дольше
+    goodBonus(){ osc(680,'sine',0.15,0.3); osc(860,'sine',0.1,0.15); },
+
+    // Поймал плохой — низкий глухой удар
+    bad(){ osc(160,'sawtooth',0.18,0.28,160,80); },
+
+    // Пропустил хороший — короткий негативный писк вниз
+    miss(){ osc(300,'triangle',0.15,0.18,300,180); },
+
+    // Бонус 🎁 — восходящий джингл из трёх нот
+    bonus(){
+      osc(523,'sine',0.12,0.3);
+      setTimeout(()=>osc(659,'sine',0.12,0.3),90);
+      setTimeout(()=>osc(784,'sine',0.22,0.35),180);
+    },
+
+    // Бомба 💣 — низкий удар + шум
+    bomb(){
+      osc(80,'sawtooth',0.3,0.4,120,40);
+      noise(0.28,0.3);
+    },
+
+    // Предупреждение о волне — два тревожных сигнала
+    wave(){
+      osc(440,'square',0.12,0.2);
+      setTimeout(()=>osc(440,'square',0.12,0.2),200);
+    },
+
+    // Конец игры — нисходящий аккорд
+    gameOver(){
+      osc(330,'sine',0.5,0.3,330,160);
+      setTimeout(()=>osc(220,'sine',0.6,0.25),120);
+    },
+
+    // Победа — восходящий финальный аккорд
+    win(){
+      osc(523,'sine',0.15,0.3);
+      setTimeout(()=>osc(659,'sine',0.15,0.3),100);
+      setTimeout(()=>osc(784,'sine',0.15,0.3),200);
+      setTimeout(()=>osc(1047,'sine',0.4,0.4),300);
+    },
+  };
+  // ─────────────────────────────────────────────────────────────
+
+  function showPanel(p){
+    ['panel-sub','panel-menu','panel-lb','panel-pause','panel-over'].forEach(id=>document.getElementById(id).classList.add('hidden'));
+    if(p) p.classList.remove('hidden');
+  }
+
+  // ── Telegram user data ────────────────────────────────────────
+  const API = 'https://YOUR_RAILWAY_URL'; // ← тот же Railway сервер
+
+  let vkUser = { id: null, first_name: 'Игрок', username: null };
+
+  // Получаем данные пользователя VK
+  async function initVkUser(){
+    try{
+      if(!window.vkBridge) return;
+      // Таймаут 3 сек — если VK не отвечает, продолжаем без ID
+      const u = await Promise.race([
+        vkBridge.send('VKWebAppGetUserInfo'),
+        new Promise((_,reject) => setTimeout(()=>reject(new Error('timeout')), 3000))
+      ]);
+      vkUser = {
+        id: u.id,
+        first_name: (u.first_name || '') + (u.last_name ? ' '+u.last_name : '') || 'Игрок',
+        username: null
+      };
+      console.log('VK user:', vkUser);
+    }catch(e){ console.log('VK user error:', e.message); }
+  }
+
+  // ── Проверка подписки VK ──────────────────────────────────────
+  async function checkSubscription(){
+    if(!vkUser.id) return true; // вне VK — пропускаем
+    try{
+      // Таймаут 5 сек на проверку подписки
+      const r = await Promise.race([
+        fetch(`${API}/vk/check-sub?user_id=${vkUser.id}`),
+        new Promise((_,reject) => setTimeout(()=>reject(new Error('timeout')), 5000))
+      ]);
+      const d = await r.json();
+      return d.subscribed === true;
+    }catch(e){
+      console.log('check-sub error:', e.message);
+      return true; // при ошибке — пропускаем, чтобы не блокировать игру
+    }
+  }
+
+  async function postScore(score){
+    if(!vkUser.id) return;
+    try{
+      await fetch(`${API}/score`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ user_id: 'vk_'+vkUser.id, first_name: vkUser.first_name, username: vkUser.username, score, platform: 'vk' })
+      });
+    }catch(e){}
+  }
+
+  async function renderLB(cid){
+    const el = document.getElementById(cid);
+    el.innerHTML = '<div class="lb-empty">Загрузка...</div>';
+    try{
+      const r = await fetch(`${API}/vk/leaderboard`);
+      const d = await r.json();
+      const lb = d.leaderboard || [];
+      el.innerHTML = '';
+      if(!lb.length){ el.innerHTML='<div class="lb-empty">Пока нет результатов</div>'; return; }
+      lb.forEach((r,i)=>{
+        const isMe = vkUser.id && r.user_id === 'vk_'+vkUser.id;
+        const row = document.createElement('div');
+        row.className = 'lb-row'+(isMe?' highlight':'');
+        row.innerHTML = `<span class="lb-rank">${i+1}</span><span class="lb-name">${r.first_name}</span><span class="lb-score">${r.score}</span>`;
+        el.appendChild(row);
+      });
+    }catch(e){ el.innerHTML='<div class="lb-empty">Ошибка загрузки</div>'; }
+  }
+
+  function scheduleBonus(now){ nextBonusTime=now+BONUS_INT_MIN+Math.random()*(BONUS_INT_MAX-BONUS_INT_MIN); }
+  function scheduleBomb(now) { nextBombTime =now+BOMB_INT_MIN +Math.random()*(BOMB_INT_MAX-BOMB_INT_MIN);  }
+  function scheduleWave(now) { nextWaveTime =now+WAVE_INTERVAL; waveWarningShown=false; }
+
+  function initBasket(){ basketTargetX=areaW()/2-36; basketX=basketTargetX; basketEl.style.left=basketX+'px'; }
+  function setTarget(cx){ const r=area.getBoundingClientRect(); let x=cx-r.left-36; x=Math.max(0,Math.min(areaW()-72,x)); basketTargetX=x; }
+  area.addEventListener('mousemove',  e=>{ if(gameActive&&!gamePaused) setTarget(e.clientX); });
+  area.addEventListener('touchmove',  e=>{ e.preventDefault(); if(gameActive&&!gamePaused&&e.touches[0]) setTarget(e.touches[0].clientX); },{passive:false});
+  area.addEventListener('touchstart', e=>{ if(gameActive&&!gamePaused&&e.touches[0]) setTarget(e.touches[0].clientX); },{passive:true});
+
+  function spawnNormal(){
+    // Проверка наложения — не спавним если рядом уже есть объект
+    const MIN_DIST = 20;
+    const x = Math.random()*(areaW()-55);
+    const overlap = objects.some(o => !o.caught && !o.missed && o.y < 80 && Math.abs(o.x - x) < MIN_DIST);
+    if(overlap) return;
+
+    const isGood=Math.random()>0.42;
+    const isFake=!isGood&&Math.random()<0.15;
+    const emoji=isGood?GOOD[Math.floor(Math.random()*GOOD.length)]:BAD[Math.floor(Math.random()*BAD.length)];
+    const el=document.createElement('div');
+    el.className='falling-obj '+(isFake?'good':(isGood?'good':'bad'));
+    el.textContent=emoji;
+    el.style.left=x+'px'; el.style.top='-70px';
+    area.appendChild(el);
+    objects.push({el,x,y:-70,type:isGood?'good':'bad',isFake,fakeRevealDone:!isFake,spawnTs:performance.now(),caught:false,missed:false});
+  }
+  function spawnSpecial(type){
+    const el=document.createElement('div');
+    const x=Math.random()*(areaW()-62);
+    el.style.left=x+'px'; el.style.top='-70px';
+    el.className='falling-obj '+type;
+    el.textContent=type==='bonus'?'🎁':'💣';
+    area.appendChild(el);
+    objects.push({el,x,y:-70,type,caught:false,missed:false,isFake:false,fakeRevealDone:true,spawnTs:0});
+  }
+  function spawnWaveBad(){
+    const MIN_DIST = 20;
+    const x=Math.random()*(areaW()-55);
+    const overlap = objects.some(o => !o.caught && !o.missed && o.y < 80 && Math.abs(o.x - x) < MIN_DIST);
+    if(overlap) return;
+    const el=document.createElement('div');
+    el.style.left=x+'px'; el.style.top='-70px';
+    el.className='falling-obj bad';
+    el.textContent=BAD[Math.floor(Math.random()*BAD.length)];
+    area.appendChild(el);
+    objects.push({el,x,y:-70,type:'bad',caught:false,missed:false,isFake:false,fakeRevealDone:true,spawnTs:0});
+  }
+
+  function triggerFlash(){ flashOvl.classList.add('flash'); setTimeout(()=>flashOvl.classList.remove('flash'),120); }
+  function showPop(x,y,text,color,big){
+    const el=document.createElement('div');
+    el.className='pop-text'+(big?' big':'');
+    el.style.left=x+'px'; el.style.top=y+'px'; el.style.color=color; el.textContent=text;
+    area.appendChild(el);
+    setTimeout(()=>el.remove(),big?1000:800);
+  }
+
+  function updateHUD(){
+    scoreEl.textContent=score;
+    stressFill.style.width=Math.min(100,stress)+'%';
+    happyFill.style.width=Math.max(0,Math.min(100,happy))+'%';
+    multBadge.classList.toggle('active',happy>=100);
+    const rem=Math.max(0,GAME_DURATION-elapsedSec);
+    const m=Math.floor(rem/60), s=Math.floor(rem%60);
+    timerEl.textContent=m+':'+(s<10?'0':'')+s;
+    timerEl.classList.toggle('danger',rem<=30);
+  }
+
+  function gameLoop(timestamp){
+    if(!gameActive||gamePaused) return;
+    const delta=lastFrameTs?(timestamp-lastFrameTs)/1000:0.016;
+    lastFrameTs=timestamp;
+    elapsedSec=(timestamp-startTime-totalPausedMs)/1000;
+
+    if(elapsedSec>=GAME_DURATION){ endGame('time'); return; }
+
+    const spd=getSpeed(elapsedSec);
+    const spawnDelay=getSpawnDelay(elapsedSec);
+
+    basketX+=(basketTargetX-basketX)*(1-Math.pow(BASKET_INERTIA,delta*60));
+    basketEl.style.left=basketX+'px';
+
+    stress=Math.min(100,stress+STRESS_PER_SEC*delta);
+    happy=Math.max(0,happy-HAPPY_DECAY_SEC*delta);
+    updateHUD();
+    if(stress>=100){ endGame('stress'); return; }
+
+    if(timestamp-lastSpawnTime>=spawnDelay){ spawnNormal(); lastSpawnTime=timestamp; }
+    if(timestamp>=nextBonusTime){ spawnSpecial('bonus'); scheduleBonus(timestamp); }
+    if(timestamp>=nextBombTime) { spawnSpecial('bomb');  scheduleBomb(timestamp);  }
+
+    if(!waveWarningShown&&timestamp>=nextWaveTime-WAVE_WARNING_MS){
+      waveBanner.classList.add('show');
+      setTimeout(()=>waveBanner.classList.remove('show'),1000);
+      SFX.wave();
+      waveWarningShown=true;
+    }
+    if(timestamp>=nextWaveTime){
+      for(let i=0;i<WAVE_COUNT;i++) setTimeout(()=>{ if(gameActive&&!gamePaused) spawnWaveBad(); },i*WAVE_GAP_MS);
+      scheduleWave(timestamp);
+    }
+
+    const bLeft=basketX, bRight=basketX+72, bTop=areaH()-60;
+    const now=performance.now();
+
+    objects.forEach(obj=>{
+      if(obj.caught||obj.missed) return;
+      if(obj.isFake&&!obj.fakeRevealDone&&now-obj.spawnTs>500){
+        obj.fakeRevealDone=true;
+        obj.el.classList.remove('good'); obj.el.classList.add('bad','fake-reveal');
+      }
+      const spd2=obj.type==='bonus'?BONUS_SPEED:obj.type==='bomb'?BOMB_SPEED:spd;
+      obj.y+=spd2; obj.el.style.top=obj.y+'px';
+      const w=(obj.type==='bonus'||obj.type==='bomb')?62:55;
+      const oR=obj.x+w, oB=obj.y+w;
+
+      if(oB>=bTop&&obj.x<bRight&&oR>bLeft&&obj.y<areaH()){
+        obj.caught=true; obj.el.remove();
+        if(obj.type==='bonus'){
+          score+=500; showPop(obj.x-10,bTop-30,'+500 🎁','#ffd23c',true);
+          SFX.bonus();
+        } else if(obj.type==='bomb'){
+          score=Math.max(0,score-500);
+          stress=Math.min(100,stress+25); happy=Math.max(0,happy-15);
+          triggerFlash(); showPop(obj.x-10,bTop-30,'💣 −500!','#ff5050',true);
+          SFX.bomb();
+        } else if(obj.type==='good'){
+          const mult=happy>=100?1.5:1.0, pts=Math.round(10*mult);
+          score+=pts; happy=Math.min(100,happy+2); stress=Math.max(0,stress-2.5);
+          showPop(obj.x,bTop-20,mult>1?'+'+pts+' ×1.5✨':'+'+pts+' 😊','#7ec87e',false);
+          mult>1 ? SFX.goodBonus() : SFX.good();
+        } else {
+          stress=Math.min(100,stress+7.5); happy=Math.max(0,happy-2.5);
+          showPop(obj.x,bTop-20,'😰 стресс!','#e56b50',false);
+          SFX.bad();
+        }
+        updateHUD();
+        if(stress>=100){ endGame('stress'); return; }
+      } else if(obj.y>areaH()+10){
+        obj.missed=true; obj.el.remove();
+        if(obj.type==='good'){
+          score=Math.max(0,score-5); happy=Math.max(0,happy-1.5); stress=Math.min(100,stress+2.0);
+          showPop(obj.x,areaH()-30,'−5 😟','#e8a870',false);
+          SFX.miss();
+          updateHUD();
+          if(stress>=100){ endGame('stress'); return; }
+        }
+      }
+    });
+    objects=objects.filter(o=>!o.caught&&!o.missed);
+    frameId=requestAnimationFrame(gameLoop);
+  }
+
+  function startGame(){
+    ensureAudio();
+    score=0; stress=0; happy=50; elapsedSec=0; totalPausedMs=0; lastFrameTs=0;
+    objects.forEach(o=>{ try{o.el.remove()}catch(e){} }); objects=[];
+    area.querySelectorAll('.falling-obj,.pop-text').forEach(e=>e.remove());
+    multBadge.classList.remove('active'); waveBanner.classList.remove('show');
+    updateHUD(); initBasket();
+    showPanel(null); btnPause.classList.add('visible'); btnMute.classList.add('visible');
+    area.classList.add('active');
+    gameActive=true; gamePaused=false;
+    frameId=requestAnimationFrame(ts=>{
+      startTime=ts; lastSpawnTime=ts; lastFrameTs=ts;
+      scheduleBonus(ts); scheduleBomb(ts); scheduleWave(ts);
+      spawnNormal(); frameId=requestAnimationFrame(gameLoop);
+    });
+  }
+
+  function pauseGame(){
+    if(!gameActive||gamePaused) return;
+    gamePaused=true; pausedAt=performance.now();
+    bgMusic.pause();
+    cancelAnimationFrame(frameId);
+    document.getElementById('pause-score-text').textContent='Текущий счёт: '+score+' очков';
+    showPanel(document.getElementById('panel-pause'));
+  }
+  function resumeGame(){
+    if(!gameActive||!gamePaused) return;
+    totalPausedMs+=performance.now()-pausedAt;
+    gamePaused=false; lastFrameTs=0;
+    bgMusic.play().catch(()=>{});
+    showPanel(null); lastSpawnTime=performance.now();
+    frameId=requestAnimationFrame(gameLoop);
+  }
+  function quitToMenu(){
+    gameActive=false; gamePaused=false;
+    cancelAnimationFrame(frameId);
+    objects.forEach(o=>{ try{o.el.remove()}catch(e){} }); objects=[];
+    area.querySelectorAll('.falling-obj,.pop-text').forEach(e=>e.remove());
+    multBadge.classList.remove('active'); waveBanner.classList.remove('show');
+    btnPause.classList.remove('visible'); btnMute.classList.remove('visible');
+    area.classList.remove('active');
+    bgMusic.pause(); bgMusic.currentTime=0;
+    showPanel(document.getElementById('panel-menu'));
+  }
+  async function endGame(reason){
+    gameActive=false; gamePaused=false;
+    cancelAnimationFrame(frameId);
+    objects.forEach(o=>{ try{o.el.remove()}catch(e){} }); objects=[];
+    area.querySelectorAll('.falling-obj,.pop-text').forEach(e=>e.remove());
+    btnPause.classList.remove('visible'); btnMute.classList.remove('visible');
+    area.classList.remove('active');
+    bgMusic.pause(); bgMusic.currentTime=0;
+    document.getElementById('score-big').textContent=score;
+    document.getElementById('over-logo').textContent  = reason==='time'?'🏆':'😵';
+    document.getElementById('end-reason').textContent = reason==='time'?'Ты выжил все 5 минут!':'Стресс зашкалил...';
+    reason==='time' ? SFX.win() : SFX.gameOver();
+    showPanel(document.getElementById('panel-over'));
+    await postScore(score);
+    await renderLB('lb-list-over');
+  }
+
+  // ── Проверка подписки при запуске ────────────────────────────
+  async function initApp(){
+    await initVkUser();
+    const subscribed = await checkSubscription();
+    if(!subscribed){
+      showPanel(document.getElementById('panel-sub'));
+    } else {
+      showPanel(document.getElementById('panel-menu'));
+    }
+  }
+
+  document.getElementById('btn-check-sub').onclick = async ()=>{
+    const errEl = document.getElementById('sub-error');
+    const btn = document.getElementById('btn-check-sub');
+    btn.textContent = 'Проверяем...';
+    btn.disabled = true;
+    try{
+      const subscribed = await checkSubscription();
+      if(subscribed){
+        errEl.textContent = '';
+        showPanel(document.getElementById('panel-menu'));
+      } else {
+        errEl.textContent = 'Подписка не найдена. Вступи и попробуй снова.';
+      }
+    }catch(e){
+      errEl.textContent = 'Ошибка проверки. Попробуй снова.';
+    }
+    btn.textContent = 'Я вступил ✓';
+    btn.disabled = false;
+  };
+
+  document.getElementById('btn-play').onclick    = startGame;
+  document.getElementById('btn-show-lb').onclick = async ()=>{ showPanel(document.getElementById('panel-lb')); await renderLB('lb-list'); };
+  document.getElementById('btn-lb-back').onclick = ()=>showPanel(document.getElementById('panel-menu'));
+  btnPause.onclick = pauseGame;
+  btnMute.onclick  = ()=>{ audioMuted=!audioMuted; btnMute.textContent=audioMuted?'🔇':'🔊'; bgMusic.muted=audioMuted; };
+  document.getElementById('btn-resume').onclick  = resumeGame;
+  document.getElementById('btn-quit').onclick    = quitToMenu;
+  document.getElementById('btn-replay').onclick  = startGame;
+  document.getElementById('btn-over-menu').onclick = ()=>showPanel(document.getElementById('panel-menu'));
+
+  initBasket();
+  initApp();
+})();
+</script>
+</body>
+</html>

@@ -67,7 +67,11 @@ app.get('/vk/check-sub', async (req, res) => {
     const url = `https://api.vk.com/method/groups.isMember?group_id=${VK_GROUP_ID}&user_id=${user_id}&access_token=${VK_TOKEN}&v=5.131`;
     const r = await fetch(url);
     const data = await r.json();
-    if (data.error) return res.json({ subscribed: false, error: data.error.error_msg });
+    console.log('VK API response:', JSON.stringify(data));
+    if (data.error) {
+      console.error('VK API error:', data.error);
+      return res.json({ subscribed: false, error: data.error.error_msg });
+    }
     res.json({ subscribed: data.response === 1 });
   } catch (e) {
     console.error('VK check-sub error:', e.message);
